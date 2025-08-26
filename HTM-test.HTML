@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Каждое слово воспроизводится — сохраняет выбранный голос</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:28px}
+    button{font-size:15px;padding:8px 12px;margin:6px}
+    #status{margin-top:12px;color:#333}
+    #log{margin-top:12px;padding:10px;border:1px solid #ddd;min-height:60px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+  <h2>Каждое слово воспроизводится (стоп-слово: "чеснок") — голос сохраняется</h2>
+
+  <div>
+    <button id="startBtn">Начать</button>
+    <button id="stopBtn" disabled>Остановить</button>
+    <label style="margin-left:12px">
+      Голос TTS:
+      <select id="voiceSelect"></select>
+    </label>
+  </div>
+
+  <div id="status">Статус: ожидаю</div>
+  <div id="log" aria-live="polite"></div>
+
+<script>
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const status = document.getElementById('status');
+const log = document.getElementById('log');
+const voiceSelect = document.getElementById('voiceSelect');
+
+let recognition;
+let recognizing = false;
+let stopRequested = false;
+const STOP_WORD = 'чеснок';
+
+let voices = [];
+let selectedVoiceName = null; // сохраняем имя выбранного голоса
+
+// Инициализация SpeechRecognition
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechRecognition) {
+  status.textContent = 'SpeechRecognition не поддерживается в этом браузере.';
+  startBtn.disabled = true;
+} else {
+  recognition = new SpeechRecognition();
+  recognition.lang = 'ru-RU';
+  recognition.interimResults = false;
+  recognition.continuous = false;
+}
+
+// Загрузка голосов и выбор
+function loadVoices() {
+  voices = speechSynthesis.getVoices() || [];
+  voiceSelect.innerHTML = '';
+  voices.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v.name;
+    opt.textContent = `${v.name} (${v.lang})${v.default ? ' — default' : ''}`;
+    voiceSelect.appendChild(opt);
+  });
+
+  // Если ранее был выбран голос — попытаться восстановить выбор
+  if (selectedVoiceName) {
+    const found = voices.find(v => v.name === selectedVoiceName);
+    if (found) {
+      voiceSelect.value = selectedVoiceName;
+    } else {
+      // если не найден — оставить первый
+      if (voices.length) voiceSelect.value = voices[0].name;
+      selectedVoiceName = voiceSelect.value;
+    }
+  } else {
+    if (voices.length) {
+      selectedVoiceName = voices[0].name;
+      voiceSelect.value = selectedVoiceName;
+    }
+  }
+}
+
+// Подождать загрузки голосов (обычный паттерн)
+function ensureVoicesLoaded(timeout = 2000) {
+  return new Promise(resolve => {
+    loadVoices();
+    if (voices.length) return resolve();
+    const onchange = () => {
+      loadVoices();
+      if (voices.length) {
+        speechSynthesis.removeEventListener('voiceschanged', onchange);
+        resolve();
+      }
+    };
+    speechSynthesis.addEventListener('voiceschanged', onchange);
+    // safety timeout
+    setTimeout(() => {
+      loadVoices();
+      speechSynthesis.removeEventListener('voiceschanged', onchange);
+      resolve();
+    }, timeout);
+  });
+}
+
+voiceSelect.addEventListener('change', () => {
+  selectedVoiceName = voiceSelect.value;
+});
+
+// Лог
+function logMsg(s) {
+  log.textContent = `${new Date().toLocaleTimeString()} — ${s}\n` + log.textContent;
+}
+
+// Воспроизведение текста — аккуратно, без cancel(), с явным назначением voice
+function speakText(text, cb) {
+  if (!text) { if (cb) cb(); return; }
+  const utter = new SpeechSynthesisUtterance(text);
+  // Обновляем список голосов на момент создания utter
+  const currentVoices = speechSynthesis.getVoices() || [];
+  let voiceToUse = currentVoices.find(v => v.name === selectedVoiceName);
+  if (!voiceToUse && currentVoices.length) {
+    voiceToUse = currentVoices[0];
+    selectedVoiceName = voiceToUse.name;
+    voiceSelect.value = selectedVoiceName;
+  }
+  if (voiceToUse) utter.voice = voiceToUse;
+  utter.rate = 1;
+  utter.pitch = 1;
+  utter.onend = () => { if (cb) cb(); };
+  utter.onerror = () => { if (cb) cb(); };
+  // Не вызываем speechSynthesis.cancel() — это может сбросить голос в некоторых движках
+  speechSynthesis.speak(utter);
+}
+
+// Обработчики распознавания
+if (recognition) {
+  recognition.onstart = () => {
+    recognizing = true;
+    status.textContent = 'Слушаю...';
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+  };
+
+  recognition.onerror = (e) => {
+    console.warn('recognition error', e);
+    if (!stopRequested) {
+      setTimeout(() => { try { recognition.start(); } catch(_){} }, 250);
+    }
+  };
+
+  recognition.onend = () => {
+    recognizing = false;
+    if (stopRequested) {
+      status.textContent = 'Остановлено';
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      return;
+    }
+    // автоматически рестартим
+    try { recognition.start(); } catch (e) {}
+  };
+
+  recognition.onresult = (evt) => {
+    const res = evt.results[0][0].transcript.trim();
+    if (!res) return;
+    logMsg('Распознано: ' + res);
+    if (res.toLowerCase().split(/\s+/).includes(STOP_WORD)) {
+      logMsg('Стоп-слово обнаружено — остановка');
+      stopRequested = true;
+      try { recognition.stop(); } catch(_) {}
+      // останавливаем фоновые речи, но не вызываем cancel перед назначением голоса в будущем
+      speechSynthesis.cancel();
+      status.textContent = 'Остановлено (услышано стоп-слово)';
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      return;
+    }
+    // Проигрываем распознанный текст. Не ждём окончания, recognition.onend перезапустит слушание.
+    speakText(res);
+  };
+}
+
+// Кнопки
+startBtn.addEventListener('click', async () => {
+  if (!recognition) return;
+  stopRequested = false;
+  log.textContent = '';
+  status.textContent = 'Загрузка голосов...';
+  await ensureVoicesLoaded();
+  status.textContent = 'Слушаю...';
+  try { recognition.start(); } catch(e) { console.warn(e); }
+});
+
+stopBtn.addEventListener('click', () => {
+  stopRequested = true;
+  try { recognition.stop(); } catch(e) {}
+  // Остановим говорящийся текст
+  speechSynthesis.cancel();
+  status.textContent = 'Остановлено вручную';
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+});
+</script>
+</body>
+</html>
