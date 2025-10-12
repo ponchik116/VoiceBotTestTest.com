@@ -2,22 +2,24 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Каждое слово воспроизводится — сохраняет выбранный голос</title>
+  <title>Голос → BUZZ-перевод</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:28px}
-    button{font-size:15px;padding:8px 12px;margin:6px}
-    #status{margin-top:12px;color:#333}
-    #log{margin-top:12px;padding:10px;border:1px solid #ddd;min-height:60px;white-space:pre-wrap}
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:20px}
+    button{padding:8px 12px;margin:6px}
+    #log{white-space:pre-wrap;border:1px solid #ddd;padding:10px;min-height:120px}
+    label{margin-left:12px}
+    .buzz-text {color: #ff6b00; font-weight: bold;}
   </style>
 </head>
 <body>
-  <h2>Каждое слово воспроизводится (стоп-слово: "чеснок") — голос сохраняется</h2>
+  <h2>Говорите (RU) — переводит в BUZZ-язык</h2>
 
   <div>
     <button id="startBtn">Начать</button>
     <button id="stopBtn" disabled>Остановить</button>
-    <label style="margin-left:12px">
-      Голос TTS:
+    <label>
+      TTS-голос (BUZZ):
       <select id="voiceSelect"></select>
     </label>
   </div>
@@ -32,15 +34,11 @@ const status = document.getElementById('status');
 const log = document.getElementById('log');
 const voiceSelect = document.getElementById('voiceSelect');
 
-let recognition;
-let recognizing = false;
-let stopRequested = false;
 const STOP_WORD = 'чеснок';
+let recognition, voices = [], selectedVoiceName = null;
+let stopRequested = false;
 
-let voices = [];
-let selectedVoiceName = null; // сохраняем имя выбранного голоса
-
-// Инициализация SpeechRecognition
+// SpeechRecognition init
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (!SpeechRecognition) {
   status.textContent = 'SpeechRecognition не поддерживается в этом браузере.';
@@ -52,7 +50,7 @@ if (!SpeechRecognition) {
   recognition.continuous = false;
 }
 
-// Загрузка голосов и выбор
+// Load voices
 function loadVoices() {
   voices = speechSynthesis.getVoices() || [];
   voiceSelect.innerHTML = '';
@@ -62,140 +60,133 @@ function loadVoices() {
     opt.textContent = `${v.name} (${v.lang})${v.default ? ' — default' : ''}`;
     voiceSelect.appendChild(opt);
   });
-
-  // Если ранее был выбран голос — попытаться восстановить выбор
-  if (selectedVoiceName) {
-    const found = voices.find(v => v.name === selectedVoiceName);
-    if (found) {
-      voiceSelect.value = selectedVoiceName;
-    } else {
-      // если не найден — оставить первый
-      if (voices.length) voiceSelect.value = voices[0].name;
-      selectedVoiceName = voiceSelect.value;
-    }
-  } else {
-    if (voices.length) {
-      selectedVoiceName = voices[0].name;
-      voiceSelect.value = selectedVoiceName;
-    }
+  if (!selectedVoiceName && voices.length) {
+    selectedVoiceName = voices[0].name;
   }
+  if (selectedVoiceName) voiceSelect.value = selectedVoiceName;
+}
+loadVoices();
+speechSynthesis.onvoiceschanged = loadVoices;
+voiceSelect.addEventListener('change', ()=> selectedVoiceName = voiceSelect.value);
+
+// BUZZ-переводчик
+function translateToBuzz(text) {
+  const words = text.toLowerCase().split(/\s+/);
+  const buzzWords = words.map(word => {
+    if (word.length === 0) return '';
+    
+    const length = word.length;
+    
+    // Разные варианты BUZZ в зависимости от длины слова
+    if (length <= 2) return 'bz';
+    if (length === 3) return 'bzz';
+    if (length === 4) return 'Bzzh';
+    if (length === 5) return 'Buzz';
+    if (length === 6) return 'BUZZ';
+    if (length === 7) return 'buzzz';
+    if (length === 8) return 'BzzzzZZz';
+    if (length === 9) return 'Buzzuh';
+    if (length >= 10) return 'BUZZ'.repeat(Math.ceil(length/4)).slice(0, length);
+    
+    return 'buzz';
+  });
+  
+  return buzzWords.join(' ');
 }
 
-// Подождать загрузки голосов (обычный паттерн)
-function ensureVoicesLoaded(timeout = 2000) {
+// Simple logger
+function logMsg(s, isBuzz = false) {
+  const prefix = isBuzz ? '<span class="buzz-text">BUZZ: </span>' : 'RU: ';
+  log.innerHTML = `${new Date().toLocaleTimeString()} — ${prefix}${s}\n` + log.innerHTML;
+}
+
+// Speak with selected voice
+function speakText(text) {
+  if (!text) return Promise.resolve();
   return new Promise(resolve => {
-    loadVoices();
-    if (voices.length) return resolve();
-    const onchange = () => {
-      loadVoices();
-      if (voices.length) {
-        speechSynthesis.removeEventListener('voiceschanged', onchange);
-        resolve();
-      }
-    };
-    speechSynthesis.addEventListener('voiceschanged', onchange);
-    // safety timeout
-    setTimeout(() => {
-      loadVoices();
-      speechSynthesis.removeEventListener('voiceschanged', onchange);
-      resolve();
-    }, timeout);
+    const utter = new SpeechSynthesisUtterance(text);
+    const currentVoices = speechSynthesis.getVoices() || [];
+    let v = currentVoices.find(x => x.name === selectedVoiceName);
+    if (!v) {
+      v = currentVoices[0];
+      if (v) selectedVoiceName = v.name;
+      if (voiceSelect) voiceSelect.value = selectedVoiceName;
+    }
+    if (v) utter.voice = v;
+    utter.rate = 0.8; // Медленнее для BUZZ-эффекта
+    utter.pitch = 1.2; // Выше тоном
+    utter.onend = () => resolve();
+    utter.onerror = () => resolve();
+    speechSynthesis.speak(utter);
   });
 }
 
-voiceSelect.addEventListener('change', () => {
-  selectedVoiceName = voiceSelect.value;
-});
-
-// Лог
-function logMsg(s) {
-  log.textContent = `${new Date().toLocaleTimeString()} — ${s}\n` + log.textContent;
-}
-
-// Воспроизведение текста — аккуратно, без cancel(), с явным назначением voice
-function speakText(text, cb) {
-  if (!text) { if (cb) cb(); return; }
-  const utter = new SpeechSynthesisUtterance(text);
-  // Обновляем список голосов на момент создания utter
-  const currentVoices = speechSynthesis.getVoices() || [];
-  let voiceToUse = currentVoices.find(v => v.name === selectedVoiceName);
-  if (!voiceToUse && currentVoices.length) {
-    voiceToUse = currentVoices[0];
-    selectedVoiceName = voiceToUse.name;
-    voiceSelect.value = selectedVoiceName;
-  }
-  if (voiceToUse) utter.voice = voiceToUse;
-  utter.rate = 1;
-  utter.pitch = 1;
-  utter.onend = () => { if (cb) cb(); };
-  utter.onerror = () => { if (cb) cb(); };
-  // Не вызываем speechSynthesis.cancel() — это может сбросить голос в некоторых движках
-  speechSynthesis.speak(utter);
-}
-
-// Обработчики распознавания
+// Recognition handlers
 if (recognition) {
   recognition.onstart = () => {
-    recognizing = true;
     status.textContent = 'Слушаю...';
     startBtn.disabled = true;
     stopBtn.disabled = false;
   };
-
   recognition.onerror = (e) => {
-    console.warn('recognition error', e);
-    if (!stopRequested) {
-      setTimeout(() => { try { recognition.start(); } catch(_){} }, 250);
-    }
+    console.warn('rec error', e);
+    if (!stopRequested) setTimeout(()=>{ try{ recognition.start(); }catch{} }, 250);
   };
-
   recognition.onend = () => {
-    recognizing = false;
     if (stopRequested) {
       status.textContent = 'Остановлено';
       startBtn.disabled = false;
       stopBtn.disabled = true;
       return;
     }
-    // автоматически рестартим
-    try { recognition.start(); } catch (e) {}
+    try { recognition.start(); } catch(e) {}
   };
-
-  recognition.onresult = (evt) => {
-    const res = evt.results[0][0].transcript.trim();
-    if (!res) return;
-    logMsg('Распознано: ' + res);
-    if (res.toLowerCase().split(/\s+/).includes(STOP_WORD)) {
-      logMsg('Стоп-слово обнаружено — остановка');
+  recognition.onresult = async (evt) => {
+    const text = (evt.results[0][0].transcript || '').trim();
+    if (!text) return;
+    logMsg(text);
+    
+    if (text.toLowerCase().split(/\s+/).includes(STOP_WORD)) {
+      logMsg('Стоп-слово: остановка');
       stopRequested = true;
-      try { recognition.stop(); } catch(_) {}
-      // останавливаем фоновые речи, но не вызываем cancel перед назначением голоса в будущем
+      try { recognition.stop(); } catch(e){}
       speechSynthesis.cancel();
       status.textContent = 'Остановлено (услышано стоп-слово)';
       startBtn.disabled = false;
       stopBtn.disabled = true;
       return;
     }
-    // Проигрываем распознанный текст. Не ждём окончания, recognition.onend перезапустит слушание.
-    speakText(res);
+
+    // Переводим в BUZZ и озвучиваем
+    status.textContent = 'Перевожу в BUZZ...';
+    const buzzText = translateToBuzz(text);
+    logMsg(buzzText, true);
+    status.textContent = 'Говорю BUZZ...';
+    await speakText(buzzText);
+    status.textContent = 'Слушаю...';
   };
 }
 
-// Кнопки
+// Buttons
 startBtn.addEventListener('click', async () => {
   if (!recognition) return;
   stopRequested = false;
-  log.textContent = '';
+  log.innerHTML = '';
   status.textContent = 'Загрузка голосов...';
-  await ensureVoicesLoaded();
+  
+  await new Promise(res => {
+    loadVoices();
+    if (speechSynthesis.getVoices().length) return res();
+    speechSynthesis.addEventListener('voiceschanged', function fc(){ loadVoices(); speechSynthesis.removeEventListener('voiceschanged', fc); res(); });
+    setTimeout(res, 1500);
+  });
   status.textContent = 'Слушаю...';
-  try { recognition.start(); } catch(e) { console.warn(e); }
+  try { recognition.start(); } catch(e) {}
 });
 
 stopBtn.addEventListener('click', () => {
   stopRequested = true;
   try { recognition.stop(); } catch(e) {}
-  // Остановим говорящийся текст
   speechSynthesis.cancel();
   status.textContent = 'Остановлено вручную';
   startBtn.disabled = false;
