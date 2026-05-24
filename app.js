@@ -10,7 +10,6 @@ const statusText = document.getElementById('statusText');
 const audioMeter = document.getElementById('audioMeter');
 const meterFill = audioMeter.querySelector('.meter-fill');
 const logArea = document.getElementById('logArea');
-const voiceToggle = document.getElementById('voiceToggle');
 
 // Глобальные переменные
 let mediaStream = null;
@@ -26,14 +25,14 @@ let lastCensorTime = 0;
 const CENSOR_COOLDOWN_MS = 2000;  // Защита от частого срабатывания
 
 // ЗАДЕРЖКА ГОЛОСА (чтобы мат перекрывался вовремя)
-let audioBufferQueue = [];       
+let audioBufferQueue = [];
 let isFlushing = false;
-const DELAY_MS = 500;            
-let sampleRate = 48000;          
-let delaySamples = 0;            
+const DELAY_MS = 600;
+let sampleRate = 48000;
+let delaySamples = 0;
 
-// Список матерных слов (базовый)
-const profanityList = [
+// ========== РУССКИЕ МАТЫ ==========
+const profanityListRussian = [
     'бля', 'блять', 'сука', 'хуй', 'пизда', 'ебать', 'ебаный', 'нахуй',
     'пиздец', 'мудак', 'гандон', 'пидор', 'лох', 'дебил', 'даун', 'еблан',
     'тварь', 'шлюха', 'курва', 'пидрила', 'ублюдок', 'ебал',
@@ -93,42 +92,19 @@ const profanityList = [
     'хуя', 'хуяк', 'хуячить', 'шароёбится', 'широкопиздая'
 ];
 
-// ========== ВТОРАЯ МОДЕЛЬ ДЕТЕКТА ==========
-// Регулярные выражения для мата (более гибкий поиск)
-const profanityRegexes = [
-    /\b[б3][л1]я(?:[тть]|д(?:ь|и)?|ти?)?\b/gi,           // бля, блять
-    /\bсу[кк]а\b/gi,                                     // сука
-    /\b[хx][уy][йй](?:[нн][ыy]?[тт]?)?\b/gi,             // хуй, хуйня
-    /\b[п6][и1]з[д3](?:[аеиоуыэюя]|ец|ёж|ил|ить)?\b/gi,  // пизда, пиздец и вариации
-    /\b[еe][б6][аа]?(?:[нн]?[ыy]?[йи]?[тт]?)?\b/gi,      // ебать, еблан
-    /\bнахуй\b/gi,                                       // нахуй
-    /\b[п6][и1]д[оа]?р\b/gi,                             // пидор, пидар
-    /\b[гg][аa]нд[оa]н\b/gi,                             // гандон
-    /\bл[оo]х\b/gi,                                      // лох
-    /\bд[еe]б[и1]л\b/gi,                                 // дебил
-    /\bд[аa]ун\b/gi,                                     // даун
-    /\bт[вв]ар[ьъ]\b/gi,                                 // тварь
-    /\bшл[юy]х[аа]\b/gi,                                 // шлюха
-    /\bк[уy]р[вв]а\b/gi,                                 // курва
-    /\b[уy]бл[юy]д[оo]к\b/gi,                            // ублюдок
-    /\b[оo]ху[еe]?[нн]?[оo]?[тт]?\b/gi,                  // охуенно, охуеть
-    /\b[з3]а[еe]б[аa]?[лд]?(?:ись)?\b/gi,                // заебал
-    /\b[п6][рp][оo][еe]б[аa]?[нн]?[ыy]?[йи]?\b/gi,       // проебан
-    /\b[рp][аa]спизд[яa]й\b/gi,                          // распиздяй
-    /\b[уy][ёe]б[аa]н?[нн]?[ыy]?[йи]?\b/gi,              // уёбан
-    /\b[хx][уy][еe]с[оo]с\b/gi,                          // хуесос
-    /\b[п6][и1][з3]д[аa]б[оo]л\b/gi,                     // пиздабол
+// ========== АНГЛИЙСКИЕ МАТЫ ==========
+const profanityListEnglish = [
+    'fuck', 'fucking', 'fucker', 'motherfucker', 'shit', 'shitty', 'bitch', 'bitchy',
+    'cunt', 'dick', 'dickhead', 'cock', 'pussy', 'asshole', 'ass', 'bastard', 'whore',
+    'slut', 'damn', 'hell', 'piss', 'crap', 'douche', 'douchebag', 'twat', 'wanker',
+    'bloody', 'arse', 'arsehole', 'bugger', 'damned', 'goddamn', 'son of a bitch',
+    'bullshit', 'horseshit', 'fuck off', 'fuck you', 'fuckin', 'fuk', 'fck',
+    'shite', 'bollocks', 'cuntish', 'dickwad', 'fucktard', 'shithead', 'shitface',
+    'asswipe', 'cum', 'cumshot', 'jizz', 'semen', 'cocksucker', 'nutsack', 'ballsack'
 ];
 
-// Функция проверки текста второй моделью (регулярки)
-function detectProfanityWithRegex(text) {
-    for (const regex of profanityRegexes) {
-        if (regex.test(text)) {
-            return true;
-        }
-    }
-    return false;
-}
+// Объединяем оба списка
+const profanityList = [...profanityListRussian, ...profanityListEnglish];
 
 // Распознавание речи
 let fastRecognition = null;
@@ -136,9 +112,6 @@ let recognitionActive = false;
 
 // Флаг блокировки цензуры
 let censoringNow = false;
-
-// Режим работы: true = голос выключен (только звук), false = голос включен
-let voiceMuted = false;
 
 /**
  * Добавление сообщения в лог
@@ -288,7 +261,7 @@ function playCensorSound() {
 /**
  * Срабатывание цензуры
  */
-function triggerCensorship(origin = 'модель 1') {
+function triggerCensorship() {
     if (!isProcessing) return;
     
     const now = Date.now();
@@ -297,12 +270,12 @@ function triggerCensorship(origin = 'модель 1') {
     }
     
     lastCensorTime = now;
-    addLog(`🔇 ЦЕНЗУРА! (${origin}) Замена мата на звук`, 'warning');
+    addLog(`🔇 ЦЕНЗУРА! Замена мата на звук`, 'warning');
     playCensorSound();
 }
 
 /**
- * Инициализация распознавания речи с двумя моделями детекта
+ * Инициализация распознавания речи (русский + английский мат)
  */
 function initFastSpeechRecognition() {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -315,7 +288,7 @@ function initFastSpeechRecognition() {
     
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'ru-RU';
+    recognition.lang = 'ru-RU'; // Русский язык, но английские слова тоже распознаются
     recognition.maxAlternatives = 1;
     
     recognition.onresult = (event) => {
@@ -324,56 +297,57 @@ function initFastSpeechRecognition() {
         const lastResult = event.results[event.results.length - 1];
         const transcript = lastResult[0].transcript.toLowerCase().trim();
         
+        // Проверка по обоим спискам (русский + английский)
         let hasProfanity = false;
         let foundWord = '';
-        let detectionModel = '';
         
-        // ПЕРВАЯ МОДЕЛЬ: проверка по списку слов
         for (const badWord of profanityList) {
             if (transcript.includes(badWord)) {
                 hasProfanity = true;
                 foundWord = badWord;
-                detectionModel = 'словарь';
                 break;
             }
         }
         
-        // Проверка отдельных слов
         if (!hasProfanity) {
             const words = transcript.split(/\s+/);
             for (const word of words) {
                 if (profanityList.includes(word)) {
                     hasProfanity = true;
                     foundWord = word;
-                    detectionModel = 'словарь';
                     break;
                 }
             }
         }
         
-        // ВТОРАЯ МОДЕЛЬ: проверка регулярными выражениями
-        if (!hasProfanity && detectProfanityWithRegex(transcript)) {
-            hasProfanity = true;
-            foundWord = `[регекс: ${transcript.substring(0, 30)}${transcript.length > 30 ? '...' : ''}]`;
-            detectionModel = 'регулярные выражения';
-        }
-        
-        // ПРЕДСКАЗАНИЕ по первым буквам (усиление первой модели)
+        // Предиктивные триггеры для английских матов
         if (!hasProfanity && transcript.length >= 2) {
-            const badStarts = ['бл', 'сук', 'хуя', 'пид', 'еб', 'нае', 'пид', 'хуе', 'хуё', 'хую', 'хуй', 'пизда', 'пиздо', 'зае'];
+            const badStarts = [
+                'fu', 'fa', 'fk',  // fuck
+                'sh', 'shi', 'shy', // shit
+                'bi', 'bic', 'bit', // bitch
+                'cu', 'cun', // cunt
+                'di', 'dic', // dick
+                'as', 'ass', // ass
+                'pu', 'pus', // pussy
+                'co', 'cock', // cock
+                'mo', 'mot', // motherfucker
+                'wh', 'who', // whore
+                'sl', 'slu', // slut
+                'ba', 'bas'  // bastard
+            ];
             for (const start of badStarts) {
                 if (transcript.startsWith(start)) {
                     hasProfanity = true;
-                    foundWord = `[предсказано: ${start}...]`;
-                    detectionModel = 'словарь (предиктор)';
+                    foundWord = `[предсказано EN: ${start}...]`;
                     break;
                 }
             }
         }
         
         if (hasProfanity) {
-            addLog(`🔇 МАТ "${foundWord}" → обнаружен моделью: ${detectionModel}`, 'warning');
-            triggerCensorship(detectionModel);
+            addLog(`🔇 МАТ (${foundWord.includes('предсказано') ? 'EN предсказание' : foundWord})`, 'warning');
+            triggerCensorship();
         }
     };
     
@@ -410,7 +384,7 @@ function updateMeter(audioData) {
 }
 
 /**
- * Обработка аудио С ЗАДЕРЖКОЙ И РЕЖИМОМ БЕЗ ГОЛОСА
+ * Обработка аудио С ЗАДЕРЖКОЙ
  */
 function processAudio(event) {
     if (!isProcessing) return;
@@ -422,17 +396,14 @@ function processAudio(event) {
     
     updateMeter(inputData);
     
-    // Добавляем в очередь все входящие семплы
     for (let i = 0; i < inputData.length; i++) {
         audioBufferQueue.push(inputData[i]);
     }
     
-    // Ограничиваем размер очереди
     while (audioBufferQueue.length > delaySamples + inputData.length) {
         audioBufferQueue.shift();
     }
     
-    // Если в очереди недостаточно данных для задержки — тишина
     if (audioBufferQueue.length < delaySamples) {
         for (let i = 0; i < outputData.length; i++) {
             outputData[i] = 0;
@@ -441,22 +412,14 @@ function processAudio(event) {
     }
     
     const now = Date.now();
-    // Период после мата, когда звук заглушается (250 мс)
-    const isMutedPeriod = (now - lastCensorTime < 250);
+    const isMuted = (now - lastCensorTime < 250);
     
     for (let i = 0; i < outputData.length; i++) {
         const delayedSample = audioBufferQueue.shift();
         
-        // Если сейчас период заглушения после мата — выводим тишину
-        if (isMutedPeriod) {
+        if (isMuted) {
             outputData[i] = 0;
-        } 
-        // Если режим "Только звук" — выводим тишину (голос отключен)
-        else if (voiceMuted) {
-            outputData[i] = 0;
-        }
-        // Иначе выводим задержанный голос
-        else {
+        } else {
             outputData[i] = delayedSample;
         }
     }
@@ -471,10 +434,6 @@ async function startProcessing() {
     lastCensorTime = 0;
     censoringNow = false;
     audioBufferQueue = [];
-    
-    // Получаем текущее состояние переключателя голоса
-    voiceMuted = voiceToggle.checked;
-    addLog(`🎮 Режим работы: ${voiceMuted ? 'Только звук (голос отключён)' : 'Голос + звук'}`, 'info');
     
     try {
         addLog('🎤 Запрос доступа к микрофону...');
@@ -511,7 +470,7 @@ async function startProcessing() {
             if (fastRecognition) {
                 recognitionActive = true;
                 fastRecognition.start();
-                addLog('🎙️ Распознавание речи запущено (2 модели детекта: словарь + регулярные выражения)');
+                addLog('🎙️ Распознавание речи запущено (русский + английский мат)');
             }
         }
         
@@ -520,10 +479,9 @@ async function startProcessing() {
         }
         
         isProcessing = true;
-        const modeText = voiceMuted ? 'ТОЛЬКО ЗВУК (голос отключён)' : 'ГОЛОС + ЗВУК';
-        updateStatus(true, `Активна - ${modeText} (задержка ${DELAY_MS} мс, 2 модели)`);
-        addLog(`✅ Готово! Режим: ${modeText}`);
-        addLog(`✅ Используются две модели обнаружения мата: словарь и регулярные выражения`);
+        updateStatus(true, `Активна - мат глушится (задержка ${DELAY_MS} мс)`);
+        addLog(`✅ Готово! Задержка голоса ${DELAY_MS} мс позволяет перекрывать мат вовремя`);
+        addLog(`📋 Загружено матов: русских ${profanityListRussian.length}, английских ${profanityListEnglish.length}, всего ${profanityList.length}`);
         
     } catch (err) {
         addLog(`❌ Ошибка: ${err.message}`, 'error');
@@ -654,27 +612,12 @@ async function previewSound() {
     addLog('🔊 Предпросмотр звука заглушки');
 }
 
-/**
- * Обработчик изменения переключателя голоса
- */
-function onVoiceToggleChange() {
-    voiceMuted = voiceToggle.checked;
-    const modeText = voiceMuted ? 'Только звук (голос отключён)' : 'Голос + звук';
-    addLog(`🎛️ Режим изменён на: ${modeText}`, 'info');
-    
-    if (isProcessing) {
-        // Обновляем статус без перезапуска обработки
-        updateStatus(true, `Активна - ${modeText} (задержка ${DELAY_MS} мс, 2 модели)`);
-    }
-}
-
 // ============ Обработчики событий ============
 startBtn.addEventListener('click', startProcessing);
 stopBtn.addEventListener('click', stopProcessing);
 requestDeviceBtn.addEventListener('click', enumerateOutputDevices);
 previewSoundBtn.addEventListener('click', previewSound);
 outputDeviceSelect.addEventListener('change', (e) => switchOutputDevice(e.target.value));
-voiceToggle.addEventListener('change', onVoiceToggleChange);
 
 soundUpload.addEventListener('change', async (e) => {
     if (e.target.files.length > 0) {
@@ -697,6 +640,6 @@ window.addEventListener('beforeunload', () => {
     if (fastRecognition) fastRecognition.stop();
 });
 
-addLog('🎙️ Система готова! Две модели детекта мата: словарь + регулярные выражения');
+addLog('🎙️ Система готова! Мат заменяется приятным мелодичным звуком');
 addLog(`⏱️ Задержка голоса ${DELAY_MS} мс для точного перекрытия мата`);
-addLog(`🎮 Переключатель "Голос/Только звук" позволяет отключить передачу голоса в выходной поток`);
+addLog(`🌍 Поддерживаются русские и английские маты (${profanityListEnglish.length} EN слов)`);
