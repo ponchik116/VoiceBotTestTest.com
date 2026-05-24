@@ -1,28 +1,63 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Voice Changer</title>
-  <style>
-    body {font-family: sans-serif; max-width: 600px; margin: 2rem auto;}
-    label, select, button {display: block; margin: 1rem 0;}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioProcessor - Заглушка мата для стримеров</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h2>Voice Changer</h2>
+    <div class="container">
+        <header>
+            <h1>🎙️ AudioProcessor для Стримера</h1>
+            <p>Нажми кнопку «Запуск» — все маты заглушаются выбранным звуком</p>
+        </header>
 
-  <label for="micSelect">Микрофон:</label>
-  <select id="micSelect"></select>
+        <!-- Панель управления -->
+        <div class="control-panel">
+            <button id="startBtn" class="btn btn-start">
+                <span class="icon">🎤</span> Запуск обработки
+            </button>
+            <button id="stopBtn" class="btn btn-stop" disabled>
+                <span class="icon">⏹️</span> Остановить
+            </button>
+        </div>
 
-  <label for="outputSelect">Вывод:</label>
-  <select id="outputSelect"></select>
+        <!-- Настройка звука заглушки -->
+        <div class="config-section">
+            <h3>🔊 Звук для заглушки мата</h3>
+            <div class="sound-config">
+                <label for="soundUpload">Загрузить свой звук (MP3/WAV):</label>
+                <input type="file" id="soundUpload" accept="audio/*">
+                <button id="previewSoundBtn" class="btn-small">Прослушать</button>
+            </div>
+        </div>
 
-  <label for="pitch">Тон (pitch): <span id="pitchVal">1</span></label>
-  <input type="range" id="pitch" min="0.5" max="2" step="0.01" value="1">
+        <!-- Выбор выходного устройства -->
+        <div class="config-section">
+            <h3>🎧 Выбор вывода звука</h3>
+            <select id="outputDeviceSelect" class="device-select">
+                <option value="">Системное устройство по умолчанию</option>
+            </select>
+            <button id="requestDeviceBtn" class="btn-small">Обновить список устройств</button>
+            <p class="hint">💡 Подсказка: Виртуальные кабели (VB-Cable, BlackHole) появятся здесь после установки драйверов</p>
+        </div>
 
-  <button id="startBtn">Запустить</button>
-  <button id="stopBtn" disabled>Остановить</button>
+        <!-- Статус и мониторинг -->
+        <div class="status-card">
+            <div class="status-header">
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span id="statusText">Не запущен</span>
+            </div>
+            <div class="audio-meter" id="audioMeter">
+                <div class="meter-fill"></div>
+            </div>
+            <div class="log-area" id="logArea">
+                <div class="log-entry system">🎙️ Система готова, нажмите «Запуск обработки»</div>
+            </div>
+        </div>
+    </div>
 
-  <script src="app.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
