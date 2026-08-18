@@ -322,6 +322,38 @@
             text-align: center;
             font-size: 0.95rem;
         }
+
+        /* Дополнительные стили для textarea списка слов */
+        #profanityListTextarea {
+            width: 100%;
+            background: #0f121f;
+            color: #f8fafc;
+            border-radius: 12px;
+            border: 1px solid #475569;
+            padding: 10px;
+            font-size: 0.9rem;
+            font-family: 'Courier New', monospace;
+            resize: vertical;
+            line-height: 1.5;
+            min-height: 120px;
+        }
+
+        /* Стиль для чекбокса распознавания шёпота */
+        .whisper-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .whisper-toggle input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        .whisper-toggle label {
+            cursor: pointer;
+            color: #cbd5e1;
+        }
     </style>
 </head>
 <body>
@@ -387,6 +419,32 @@
         </div>
     </div>
 
+    <!-- НОВЫЙ БЛОК: РЕДАКТОР СПИСКА ЗАПРЕЩЁННЫХ СЛОВ -->
+    <div class="config-section">
+        <h3>📝 Список запрещённых слов</h3>
+        <div class="word-list-controls">
+            <textarea id="profanityListTextarea" rows="6" placeholder="Каждое слово с новой строки..."></textarea>
+            <div style="display:flex; gap:10px; margin-top:8px; flex-wrap:wrap;">
+                <button id="applyWordListBtn" class="btn-small">✅ Применить список</button>
+                <button id="downloadWordListBtn" class="btn-small">⬇️ Скачать список</button>
+                <button id="uploadWordListBtn" class="btn-small">⬆️ Загрузить список</button>
+                <button id="resetWordListBtn" class="btn-small">🔄 Сбросить по умолчанию</button>
+            </div>
+            <input type="file" id="wordListUploadInput" accept=".json,application/json" style="display:none;">
+            <p class="hint">✏️ Каждое слово с новой строки. Нажмите «Применить», чтобы сохранить изменения. Список можно скачать в формате JSON и загрузить обратно.</p>
+        </div>
+    </div>
+
+    <!-- НОВЫЙ БЛОК: РАСПОЗНАВАНИЕ ШЁПОТА -->
+    <div class="config-section">
+        <h3>🤫 Распознавание шёпота</h3>
+        <div class="whisper-toggle">
+            <input type="checkbox" id="whisperModeCheckbox">
+            <label for="whisperModeCheckbox">Распознавать шёпот (экспериментально)</label>
+        </div>
+        <p class="hint">⚠️ Включает повышенную чувствительность распознавания. Может снизить точность обычной речи и увеличить ложные срабатывания.</p>
+    </div>
+
     <div class="config-section">
         <h3>🎧 Выбор вывода звука</h3>
         <select id="outputDeviceSelect" class="device-select">
@@ -434,6 +492,17 @@
         const volumeSlider = document.getElementById('volumeSlider');
         const volumeLabel = document.getElementById('volumeLabel');
 
+        // Элементы редактора списка слов
+        const profanityListTextarea = document.getElementById('profanityListTextarea');
+        const applyWordListBtn = document.getElementById('applyWordListBtn');
+        const downloadWordListBtn = document.getElementById('downloadWordListBtn');
+        const uploadWordListBtn = document.getElementById('uploadWordListBtn');
+        const resetWordListBtn = document.getElementById('resetWordListBtn');
+        const wordListUploadInput = document.getElementById('wordListUploadInput');
+
+        // Элемент для режима шёпота
+        const whisperModeCheckbox = document.getElementById('whisperModeCheckbox');
+
         // Глобальные переменные
         let mediaStream = null;
         let audioContext = null;
@@ -448,6 +517,7 @@
         let currentMuteDurationMs = 380;
         let currentBeepCooldownMs = 1500;
         let volume = 0.8;  // по умолчанию 80%
+        let whisperMode = false; // режим распознавания шёпота
 
         // Переменные для цензуры
         let lastCensorTime = 0;
@@ -465,14 +535,16 @@
         let fastRecognition = null;
         let recognitionActive = false;
 
-        // Словари матов (оставлены без изменений для краткости)
+        // Словари матов (базовые)
         const profanityListRussian = [
             'бля','блять','сука','хуй','пизда','ебать','ебаный','нахуй','пиздец','мудак','гандон','пидор','лох','дебил','даун','еблан','тварь','шлюха','курва','пидрила','ублюдок','ебал','беспиздая','блядва','блядиада','блядина','блядистость','блядки','блядовать','блядогон','блядословник','блядский','блядство','блядун','блядь','бляхомудня','взбляд','взъебнуть','взъёбка','взъёбывать','взъебщик','впиздить','впиздиться','впиздохать','впиздохивать','впиздохиваться','впиздронивать','впиздрониваться','впиздюлить','впиздячил','впиздячить','впизживать','впизживаться','вхуйнуть','вхуйнуться','вхуяривание','вхуярить','выблядовал','выблядок','выебать','выебок','выебон','выебывается','выпиздеться','выпиздить','выхуяривание','въебать','въёбывать','глупизди','говноёб','голоёбица','греблядь','дерьмохеропиздократ','дерьмохеропиздократия','доебался','доебаться','доёбывать','долбоёб','допиздеться','дохуйнуть','дохуякать','дохуякивать','дохуяриваться','дуроёб','дядеёб','ебалка','ебало','ебалово','ебальник','ебанатик','ебандей','ебанешься','ебанул','ебанулся','ебануть','ебануться','ебанутый','ебанько','ебаришка','ебаторий','ебаться','ебашит','ебеня','ебёт','ебистика','еблан','ебланить','ебливая','ебля','ебукентий','ёбака','ёбаный','ёбарь','ёбкость','ёбля','ёбнул','ёбнуться','ёбнутый','ёбс','жидоёб','жидоёбка','жидоёбский','заебал','заебать','заебись','заебцовый','заебенить','заёб','заёбанный','заебаться','запизденевать','запиздеть','запиздить','запизживаться','захуяривать','захуярить','злоебучая','изъебнулся','испизделся','испиздить','исхуячить','козлоёб','козлоёбина','козлоёбиться','козлоёбище','коноёбиться','косоёбится','многопиздная','мозгоёб','мудоёб','наблядовал','наебалово','наебать','наебаться','наебашился','наебениться','наебнулся','наебнуть','наёбка','нахуевертеть','нахуяривать','нахуяриться','напиздеть','напиздить','настоебать','невъебенный','нехуёвый','нехуй','оберблядь','объебал','объебалово','объебательство','объебать','объебаться','объебос','один хуй','однохуйственно','опизденевать','опиздихуительный','опиздоумел','оскотоёбился','остоебал','остопиздело','остопиздеть','остохуеть','отпиздить','отхуяривать','отъебаться','охуевать','охуенно','охуенный','охуительный','охуячивать','охуячить','переебать','перехуяривать','перехуярить','пёзды','пизда','пиздабол','пиздаёб','пиздакрыл','пиздануть','пиздануться','пиздатый','пизделиться','пизделякает','пиздеть','пиздец','пиздецкий','пиздёж','пиздёныш','пиздить','пиздобол','пиздоблошка','пиздобрат','пиздобратия','пиздовать','сучка','сучки','щит','бич','сановбич','дик','пиздовладелец','пиздодушие','пиздоёбищность','пиздолет','пиздолиз','пуси','эсхоул','эс','крэп','факинг','фак','пиздомания','пиздопляска','пиздорванец','пиздострадалец','пиздострадания','пиздохуй','пиздошить','пиздрик','пиздуй','пиздун','пиздюк','пиздюли','пиздюлина','пиздюлька','пиздюля','пиздюрить','пиздюхать','пиздюшник','подзаебать','подзаебенить','поднаебнуть','поднаебнуться','поднаёбывать','подпёздывать','подпиздывает','подъебнуть','подъёбка','подъёбки','подъёбывать','поебать','поебень','попиздеть','попиздили','похую','похуярили','приебаться','припиздеть','припиздить','прихуяривать','прихуярить','проблядь','проебать','проебаться','проёб','пропиздить','разъебай','разъебаться','разёбанный','распиздон','распиздошил','распиздяй','распиздяйство','расхуюжить','расхуяривать','скотоёб','скотоёбина','сосихуйский','спиздил','страхоёбище','сухопиздая','схуярить','съебаться','трепиздон','трепиздонит','туебень','тупиздень','уебался','уебать','уёбище','уёбищенск','уёбок','уёбывать','упиздить','хитровыебанный','хуев','хуеватенький','хуевато','худоёбина','хуебратия','хуеглот','хуегрыз','хуедин','хуелес','хуеман','хуемырло','хуеплёт','хуепутяло','хуесос','хуета','хуетень','хуёвина','хуёвничать','хуёво','хуёвый','хуила','хуйло','хуйнуть','хуйня','хуярить','хуяция','хули','хуя','хуяк','хуячить','шароёбится','широкопиздая'
         ];
         const profanityListEnglish = [
             'fuck','fucking','fucker','motherfucker','shit','shitty','bitch','bitchy','cunt','dick','dickhead','cock','pussy','asshole','ass','bastard','whore','slut','damn','hell','piss','crap','douche','douchebag','twat','wanker','bloody','arse','arsehole','bugger','damned','goddamn','son of a bitch','bullshit','horseshit','fuck off','fuck you','fuckin','fuk','fck','shite','bollocks','cuntish','dickwad','fucktard','shithead','shitface','asswipe','cum','cumshot','jizz','semen','cocksucker','nutsack','ballsack'
         ];
-        const profanityList = [...profanityListRussian, ...profanityListEnglish];
+
+        // Текущий список запрещённых слов (изначально — объединение русских и английских)
+        let profanityList = [...profanityListRussian, ...profanityListEnglish];
 
         // Вспомогательные функции
         function addLog(message, type = 'info') {
@@ -614,6 +686,14 @@
             rec.continuous = true;
             rec.interimResults = true;
             rec.lang = 'ru-RU';
+
+            // Включаем повышенную чувствительность для шёпота
+            if (whisperMode) {
+                rec.maxAlternatives = 10;  // больше альтернатив распознавания
+                // Примечание: это не гарантирует распознавание шёпота, но может помочь
+                addLog('🤫 Режим распознавания шёпота активирован', 'system');
+            }
+
             rec.onresult = (event) => {
                 if (!isProcessing) return;
                 const last = event.results[event.results.length-1];
@@ -669,6 +749,8 @@
         async function startProcessing() {
             if (isProcessing) return;
             loadTimingSettings();
+            applyProfanityListFromTextarea(); // Применяем текущий текст списка перед стартом
+            whisperMode = whisperModeCheckbox.checked; // считываем режим шёпота
             lastCensorTime = 0;
             lastBeepTime = 0;
             censoringNow = false;
@@ -694,7 +776,7 @@
                 if (fastRecognition) {
                     recognitionActive = true;
                     fastRecognition.start();
-                    addLog('🎙️ Распознавание речи (мат-детект) активно');
+                    addLog('🎙️ Распознавание речи (мат-детект) активно' + (whisperMode ? ' в режиме шёпота' : ''));
                 }
                 if (audioContext.state === 'suspended') await audioContext.resume();
                 isProcessing = true;
@@ -766,7 +848,62 @@
         volumeSlider.addEventListener('input', updateVolume);
         updateVolume(); // установить начальное отображение
 
-        // Привязка событий
+        // ====== ФУНКЦИИ ДЛЯ РЕДАКТОРА СПИСКА СЛОВ ======
+        function populateProfanityTextarea() {
+            profanityListTextarea.value = profanityList.join('\n');
+        }
+
+        function applyProfanityListFromTextarea() {
+            const rawText = profanityListTextarea.value;
+            const words = rawText.split(/\r?\n/)
+                .map(w => w.trim())
+                .filter(w => w.length > 0);
+            profanityList = [...new Set(words)]; // удаляем дубликаты
+            addLog(`✅ Список слов обновлён: ${profanityList.length} слов`, 'system');
+        }
+
+        function downloadProfanityList() {
+            const dataStr = JSON.stringify(profanityList, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'profanity_list.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            addLog('⬇️ Список сохранён в файл profanity_list.json', 'system');
+        }
+
+        function uploadProfanityList(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (!Array.isArray(data) || !data.every(item => typeof item === 'string')) {
+                        throw new Error('Неверный формат: ожидается массив строк');
+                    }
+                    profanityList = [...new Set(data.map(s => s.trim()).filter(s => s.length > 0))];
+                    populateProfanityTextarea();
+                    addLog(`⬆️ Загружен список из файла: ${profanityList.length} слов`, 'system');
+                } catch (err) {
+                    addLog(`❌ Ошибка загрузки списка: ${err.message}`, 'error');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function resetProfanityList() {
+            profanityList = [...profanityListRussian, ...profanityListEnglish];
+            populateProfanityTextarea();
+            addLog(`🔄 Список сброшен по умолчанию (${profanityList.length} слов)`, 'system');
+        }
+
+        // Инициализация списка
+        populateProfanityTextarea();
+
+        // ====== ПРИВЯЗКА СОБЫТИЙ ======
         startBtn.addEventListener('click', startProcessing);
         stopBtn.addEventListener('click', stopProcessing);
         requestDeviceBtn.addEventListener('click', enumerateOutputDevices);
@@ -783,7 +920,23 @@
         muteDurationInput.addEventListener('input', loadTimingSettings);
         beepCooldownInput.addEventListener('input', loadTimingSettings);
 
-        // Инициализация
+        // События редактора списка слов
+        applyWordListBtn.addEventListener('click', applyProfanityListFromTextarea);
+        downloadWordListBtn.addEventListener('click', downloadProfanityList);
+        uploadWordListBtn.addEventListener('click', () => wordListUploadInput.click());
+        wordListUploadInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) uploadProfanityList(e.target.files[0]);
+            e.target.value = ''; // сброс, чтобы можно было загрузить тот же файл повторно
+        });
+        resetWordListBtn.addEventListener('click', resetProfanityList);
+
+        // Обработчик изменения режима шёпота (можно просто хранить состояние, применяется при старте)
+        whisperModeCheckbox.addEventListener('change', () => {
+            whisperMode = whisperModeCheckbox.checked;
+            addLog(`🤫 Режим распознавания шёпота ${whisperMode ? 'включён' : 'выключен'}`, 'system');
+        });
+
+        // Инициализация устройств
         enumerateOutputDevices();
         navigator.mediaDevices.addEventListener('devicechange', enumerateOutputDevices);
         window.addEventListener('beforeunload', () => {
